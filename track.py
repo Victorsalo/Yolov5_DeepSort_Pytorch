@@ -18,6 +18,7 @@ from pathlib import Path
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
+import pickle
 
 from yolov5.models.experimental import attempt_load
 from yolov5.utils.downloads import attempt_download
@@ -110,7 +111,7 @@ def detect(opt):
     # extract what is in between the last '/' and last '.'
     txt_file_name = source.split('/')[-1].split('.')[0]
     txt_path = str(Path(save_dir)) + '/' + txt_file_name + '.txt'
-    id_txt_path = str(Path(save_dir)) + '/' + txt_file_name + '_id' + '.txt'
+    id_pickle_path = str(Path(save_dir)) + '/' + txt_file_name + '_id' + '.pickle'
 
     if pt and device.type != 'cpu':
         model(torch.zeros(1, 3, *imgsz).to(device).type_as(next(model.model.parameters())))  # warmup
@@ -177,13 +178,13 @@ def detect(opt):
                 dt[3] += t5 - t4
 
                 # pass detections to numberid
-                # for bbox in outputs:
-                #     person = img[bbox[0]:bbox[2], bbox[1]:bbox[3], :]
-                #     num_pred = model(person)
-                #     if bbox[4] in num_id_dict.keys():
-                #         num_id_dict[bbox[4]].append(num_pred)
-                #     else:
-                #         num_id_dict[bbox[4]] = [num_pred]
+                for bbox in outputs:
+                    person = img[bbox[0]:bbox[2], bbox[1]:bbox[3], :]
+                    num_pred = num_model(person)
+                    if bbox[4] in num_id_dict.keys():
+                        num_id_dict[bbox[4]].append(num_pred)
+                    else:
+                        num_id_dict[bbox[4]] = [num_pred]
 
                 # draw boxes for visualization
                 if len(outputs) > 0:
@@ -236,6 +237,10 @@ def detect(opt):
 
                     vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
                 vid_writer.write(im0)
+
+            # Pickle related numbers
+            with open(id_pickle_path, "wb") as f:
+                pickle.dump(num_id_dict, f)
 
     # Print results
     t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
