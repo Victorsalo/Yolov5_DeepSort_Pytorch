@@ -38,8 +38,8 @@ ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
 
 def detect(opt):
-    out, source, yolo_model, deep_sort_model, show_vid, save_vid, save_txt, imgsz, evaluate, half, project, name, exist_ok= \
-        opt.output, opt.source, opt.yolo_model, opt.deep_sort_model, opt.show_vid, opt.save_vid, \
+    out, source, yolo_model, num_model, deep_sort_model, show_vid, save_vid, save_txt, imgsz, evaluate, half, project, name, exist_ok= \
+        opt.output, opt.source, opt.yolo_model, opt.num_yolo_model, opt.deep_sort_model, opt.show_vid, opt.save_vid, \
         opt.save_txt, opt.imgsz, opt.evaluate, opt.half, opt.project, opt.name, opt.exist_ok
     webcam = source == '0' or source.startswith(
         'rtsp') or source.startswith('http') or source.endswith('.txt')
@@ -72,11 +72,15 @@ def detect(opt):
     save_dir = increment_path(Path(project) / exp_name, exist_ok=exist_ok)  # increment run if project name exists
     save_dir.mkdir(parents=True, exist_ok=True)  # make dir
 
-    # Load model
+    # Load personid model
     device = select_device(device)
     model = DetectMultiBackend(yolo_model, device=device, dnn=opt.dnn)
     stride, names, pt, jit, _ = model.stride, model.names, model.pt, model.jit, model.onnx
     imgsz = check_img_size(imgsz, s=stride)  # check image size
+
+    # Load numberid model
+    num_model = DetectMultiBackend(num_model, device=device, dnn=opt.dnn)
+    # num_stride, num_names, num_pt, num_jit, _ = num_model.stride, num_model.names, num_model.pt, num_model.jit, num_model.onnx
 
     # Half
     half &= pt and device.type != 'cpu'  # half precision only supported by PyTorch on CUDA
@@ -106,10 +110,13 @@ def detect(opt):
     # extract what is in between the last '/' and last '.'
     txt_file_name = source.split('/')[-1].split('.')[0]
     txt_path = str(Path(save_dir)) + '/' + txt_file_name + '.txt'
+    id_txt_path = str(Path(save_dir)) + '/' + txt_file_name + '_id' + '.txt'
 
     if pt and device.type != 'cpu':
         model(torch.zeros(1, 3, *imgsz).to(device).type_as(next(model.model.parameters())))  # warmup
+        # num_model(torch.zeros(1, 3, *imgsz).to(device).type_as(next(num_model.model.parameters())))  # warmup
     dt, seen = [0.0, 0.0, 0.0, 0.0], 0
+    num_id_dict = {}
     for frame_idx, (path, img, im0s, vid_cap, s) in enumerate(dataset):
         t1 = time_sync()
         img = torch.from_numpy(img).to(device)
@@ -123,11 +130,15 @@ def detect(opt):
         # Inference
         visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if opt.visualize else False
         pred = model(img, augment=opt.augment, visualize=visualize)
+        num_pred = num_model(img, augment=opt.augment, visualize=visualize)
         t3 = time_sync()
         dt[1] += t3 - t2
 
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, opt.classes, opt.agnostic_nms, max_det=opt.max_det)
+        # We might need to change to other thresholds for the number detection
+        num_classes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        num_pred = non_max_suppression(num_pred, opt.conf_thres, opt.iou_thres, num_classes, opt.agnostic_nms, max_det=opt.max_det)
         dt[2] += time_sync() - t3
 
         # Process detections
@@ -164,6 +175,15 @@ def detect(opt):
                 outputs = deepsort.update(xywhs.cpu(), confs.cpu(), clss.cpu(), im0)
                 t5 = time_sync()
                 dt[3] += t5 - t4
+
+                # pass detections to numberid
+                # for bbox in outputs:
+                #     person = img[bbox[0]:bbox[2], bbox[1]:bbox[3], :]
+                #     num_pred = model(person)
+                #     if bbox[4] in num_id_dict.keys():
+                #         num_id_dict[bbox[4]].append(num_pred)
+                #     else:
+                #         num_id_dict[bbox[4]] = [num_pred]
 
                 # draw boxes for visualization
                 if len(outputs) > 0:
@@ -230,6 +250,7 @@ def detect(opt):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--yolo_model', nargs='+', type=str, default='yolov5m.pt', help='model.pt path(s)')
+    parser.add_argument('--num_yolo_model', nargs='+', type=str, default='num_yolov5m.pt', help='num_model.pt path(s)')
     parser.add_argument('--deep_sort_model', type=str, default='osnet_ibn_x1_0_MSMT17')
     parser.add_argument('--source', type=str, default='0', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--output', type=str, default='inference/output', help='output folder')  # output folder
