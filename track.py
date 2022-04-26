@@ -8,6 +8,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import sys
 sys.path.insert(0, './yolov5')
+import pdb
 
 import argparse
 import os
@@ -179,7 +180,9 @@ def detect(opt):
 
                 # pass detections to numberid
                 for bbox in outputs:
-                    person = img[bbox[0]:bbox[2], bbox[1]:bbox[3], :]
+                    person = img[:, :, bbox[0]:bbox[2], bbox[1]:bbox[3]]
+                    print(person.size())
+                    print(img.size())
                     num_pred = num_model(person)
                     if bbox[4] in num_id_dict.keys():
                         num_id_dict[bbox[4]].append(num_pred)
