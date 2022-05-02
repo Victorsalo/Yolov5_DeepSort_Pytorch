@@ -8,7 +8,6 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import sys
 sys.path.insert(0, './yolov5')
-import pdb
 
 import argparse
 import os
@@ -20,6 +19,7 @@ import cv2
 import torch
 import torch.backends.cudnn as cudnn
 import pickle
+import numpy as np
 
 from yolov5.models.experimental import attempt_load
 from yolov5.utils.downloads import attempt_download
@@ -27,6 +27,7 @@ from yolov5.models.common import DetectMultiBackend
 from yolov5.utils.datasets import LoadImages, LoadStreams
 from yolov5.utils.general import (LOGGER, check_img_size, non_max_suppression, scale_coords, 
                                   check_imshow, xyxy2xywh, increment_path)
+from yolov5.utils.augmentations import letterbox
 from yolov5.utils.torch_utils import select_device, time_sync
 from yolov5.utils.plots import Annotator, colors
 from deep_sort.utils.parser import get_config
@@ -132,7 +133,7 @@ def detect(opt):
         # Inference
         visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if opt.visualize else False
         pred = model(img, augment=opt.augment, visualize=visualize)
-        num_pred = num_model(img, augment=opt.augment, visualize=visualize)
+        # num_pred = num_model(img, augment=opt.augment, visualize=visualize)
         t3 = time_sync()
         dt[1] += t3 - t2
 
@@ -140,7 +141,7 @@ def detect(opt):
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, opt.classes, opt.agnostic_nms, max_det=opt.max_det)
         # We might need to change to other thresholds for the number detection
         num_classes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-        num_pred = non_max_suppression(num_pred, opt.conf_thres, opt.iou_thres, num_classes, opt.agnostic_nms, max_det=opt.max_det)
+        # num_pred = non_max_suppression(num_pred, opt.conf_thres, opt.iou_thres, num_classes, opt.agnostic_nms, max_det=opt.max_det)
         dt[2] += time_sync() - t3
 
         # Process detections
@@ -180,14 +181,24 @@ def detect(opt):
 
                 # pass detections to numberid
                 for bbox in outputs:
-                    person = img[:, :, bbox[0]:bbox[2], bbox[1]:bbox[3]]
-                    print(person.size())
-                    print(img.size())
+                    person = im0[bbox[1]:bbox[3], bbox[0]:bbox[2], :]
+                    # Padded resize
+                    person = letterbox(person, new_shape=(125, 125), stride=stride, auto=pt and not jit)[0]
+                    # Convert
+                    person = person.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
+                    person = np.ascontiguousarray(person)
+                    person = torch.from_numpy(person).to(device)
+                    person = person.half() if half else person.float()  # uint8 to fp16/32
+                    person /= 255.0  # 0 - 255 to 0.0 - 1.0
+                    if person.ndimension() == 3:
+                        person = person.unsqueeze(0)
+                    # should maybe pass person to letterbox before detection
                     num_pred = num_model(person)
                     if bbox[4] in num_id_dict.keys():
                         num_id_dict[bbox[4]].append(num_pred)
                     else:
                         num_id_dict[bbox[4]] = [num_pred]
+                t6 = time_sync()
 
                 # draw boxes for visualization
                 if len(outputs) > 0:
@@ -212,7 +223,7 @@ def detect(opt):
                                 f.write(('%g ' * 10 + '\n') % (frame_idx + 1, id, bbox_left,  # MOT format
                                                                bbox_top, bbox_w, bbox_h, -1, -1, -1, -1))
 
-                LOGGER.info(f'{s}Done. YOLO:({t3 - t2:.3f}s), DeepSort:({t5 - t4:.3f}s)')
+                LOGGER.info(f'{s}Done. YOLO:({t3 - t2:.3f}s), DeepSort:({t5 - t4:.3f}s), NumberID:({t6 - t5:.3f}s)')
 
             else:
                 deepsort.increment_ages()
