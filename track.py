@@ -192,8 +192,15 @@ def detect(opt):
                     person /= 255.0  # 0 - 255 to 0.0 - 1.0
                     if person.ndimension() == 3:
                         person = person.unsqueeze(0)
-                    # should maybe pass person to letterbox before detection
                     num_pred = num_model(person)
+                    num_pred = non_max_suppression(num_pred, 0.25, 0.05, None, opt.agnostic_nms)
+                    # clean up numbers
+                    if len(num_pred) > 3:
+                        pass
+                    elif len(num_pred) == 2:
+                        pass
+                    elif len(num_pred) == 1:
+                        pass
                     if bbox[4] in num_id_dict.keys():
                         num_id_dict[bbox[4]].append(num_pred)
                     else:
